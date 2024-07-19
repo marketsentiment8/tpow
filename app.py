@@ -9,7 +9,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # Connect to the blockchain
-web3 = Web3(Web3.HTTPProvider('http://127.0.0.1:8545'))  # Adjust port if needed
+web3 = Web3(Web3.HTTPProvider('http://127.0.0.1:8545')) 
 contract_address = os.getenv('CONTRACT_ADDRESS')
 owner_address = os.getenv('OWNER_ADDRESS')
 owner_private_key = os.getenv('OWNER_PRIVATE_KEY')
@@ -52,7 +52,7 @@ def assign_task():
 
     assign_task_tx = contract.functions.assignTask(task_id, miner_address).build_transaction({
         'chainId': 1,
-        'gas': 70000,
+        'gas': 100000,
         'gasPrice': web3.to_wei('20', 'gwei'),  
         'nonce': web3.eth.get_transaction_count(owner_address),
     })
@@ -66,17 +66,27 @@ def submit_result():
     task_id = int(request.form['task_id'])
     model_hash = request.form['model_hash']
     accuracy = int(request.form['accuracy'])
-    miner_private_key = 'your_miner_private_key_here'  # Change this to the actual miner's private key
+    miner_private_key = request.form['miner_private_key']
+    miner_address = request.form['miner_address']
 
+    # Fetch the latest nonce for the miner's address
+    nonce = web3.eth.get_transaction_count(miner_address)
+
+    # Build the transaction without the 'to' field
     submit_result_tx = contract.functions.submitResult(task_id, model_hash, accuracy).build_transaction({
-        'chainId': 1,
-        'gas': 70000,
-        'gasPrice': web3.to_wei('20', 'gwei'),  
-        'nonce': web3.eth.get_transaction_count(owner_address),
+        'chainId': 1,  # Ensure this matches your network
+        'gas': 100000,
+        'maxFeePerGas': web3.to_wei('2', 'gwei'),
+        'maxPriorityFeePerGas': web3.to_wei('1', 'gwei'),
+        'nonce': nonce,
+        'type': 2,  # EIP-1559 transaction
     })
-    print(f'Sumbit Result tx output for error debug: {submit_result_tx}')
-    signed_tx = web3.eth.account.sign_transaction(submit_result_tx, private_key=miner_private_key)
-    web3.eth.send_raw_transaction(signed_tx.rawTransaction)
+
+    # Sign the transaction with the miner's private key
+    #signed_tx = web3.eth.account.sign_transaction(submit_result_tx, private_key=miner_private_key)
+
+    # Send the signed transaction
+    #tx_hash = web3.eth.send_raw_transaction(signed_tx.rawTransaction)
 
     return redirect(url_for('index'))
 

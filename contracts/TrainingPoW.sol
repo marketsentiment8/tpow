@@ -42,12 +42,10 @@ contract TrainingPoW {
         tasks[taskId].modelHash = modelHash;
         emit ResultSubmitted(taskId, modelHash, accuracy);
 
-        // Calculate reward based on accuracy
         uint256 reward = calculateReward(taskId, accuracy);
-
-        // Transfer reward to the miner
         payable(msg.sender).transfer(reward);
     }
+
 
     function calculateReward(uint256 taskId, uint256 accuracy) internal view returns (uint256) {
         if (accuracy >= 90) {
