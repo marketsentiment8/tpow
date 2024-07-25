@@ -10,4 +10,10 @@ timeout /T 5
 python deploy_env.py
 
 :: Start the Flask application
-python app.py
+start /B python app.py
+
+:: Start worker node
+start /B python worker.py
+
+:: Start validator node
+start /B python validator.py

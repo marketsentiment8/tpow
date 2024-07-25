@@ -1,8 +1,9 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 from web3 import Web3
 import json
 import os
 from dotenv import load_dotenv
+import syft as sy  # Import PySyft
 
 load_dotenv()
 
@@ -19,6 +20,9 @@ with open('build/contracts/TrainingPoW.json') as f:
     contract_abi = json.load(f)['abi']
 contract = web3.eth.contract(address=contract_address, abi=contract_abi)
 
+
+sy_domain = sy.Domain(name="ComputePool")
+
 @app.route('/')
 def index():
     tasks = contract.functions.taskCount().call()
@@ -28,13 +32,21 @@ def index():
         task_list.append(task)
     return render_template("index.html", tasks=task_list)
 
+@app.route('/register_node', methods=['POST'])
+def register_node():
+    node_address = request.form['node_address']
+    # Register the node with PySyft
+    # Note: Actual implementation might involve more details like checking node status, capabilities, etc.
+    sy_node = sy_domain.register_node(node_address)
+    return jsonify({'status': 'Node registered successfully', 'node_id': sy_node.id})
+
 @app.route('/create_task', methods=['POST'])
 def create_task():
-    dataset_hash = request.form['dataset_hash']
-    model_hash = request.form['model_hash']
+    dataset_url = request.form['dataset_url']
+    model_code = request.form['model_code']  # Assuming model code is submitted as a string
     reward = int(request.form['reward'])
 
-    create_task_tx = contract.functions.createTask(dataset_hash, model_hash, reward).build_transaction({
+    create_task_tx = contract.functions.createTask(dataset_url, model_code, reward).build_transaction({
         'chainId': 1,
         'gas': 1000000,
         'gasPrice': web3.to_wei('20', 'gwei'),  
@@ -48,9 +60,13 @@ def create_task():
 @app.route('/assign_task', methods=['POST'])
 def assign_task():
     task_id = int(request.form['task_id'])
-    miner_address = request.form['miner_address']
+    node_id = request.form['node_id']
 
-    assign_task_tx = contract.functions.assignTask(task_id, miner_address).build_transaction({
+    # Assign task to node in PySyft
+    task = sy_domain.assign_task(task_id, node_id)
+
+    # Interact with the blockchain to record the assignment
+    assign_task_tx = contract.functions.assignTask(task_id, node_id).build_transaction({
         'chainId': 1,
         'gas': 100000,
         'gasPrice': web3.to_wei('20', 'gwei'),  
@@ -59,36 +75,30 @@ def assign_task():
     signed_tx = web3.eth.account.sign_transaction(assign_task_tx, private_key=owner_private_key)
     web3.eth.send_raw_transaction(signed_tx.rawTransaction)
 
-    return redirect(url_for('index'))
+    return jsonify({'status': 'Task assigned successfully', 'task_id': task.id})
 
 @app.route('/submit_result', methods=['POST'])
 def submit_result():
     task_id = int(request.form['task_id'])
-    model_hash = request.form['model_hash']
-    accuracy = int(request.form['accuracy'])
+    model_weights = request.form['model_weights']  # Assume weights are serialized and submitted
+    accuracy = float(request.form['accuracy'])
     miner_private_key = request.form['miner_private_key']
     miner_address = request.form['miner_address']
 
-    # Fetch the latest nonce for the miner's address
-    nonce = web3.eth.get_transaction_count(miner_address)
+    # Submit results via PySyft
+    sy_domain.submit_task_result(task_id, model_weights, accuracy)
 
-    # Build the transaction without the 'to' field
-    submit_result_tx = contract.functions.submitResult(task_id, model_hash, accuracy).build_transaction({
-        'chainId': 1,  # Ensure this matches your network
+    # Record the result submission on the blockchain
+    submit_result_tx = contract.functions.submitResult(task_id, model_weights, accuracy).build_transaction({
+        'chainId': 1,
         'gas': 100000,
-        'maxFeePerGas': web3.to_wei('2', 'gwei'),
-        'maxPriorityFeePerGas': web3.to_wei('1', 'gwei'),
-        'nonce': nonce,
-        'type': 2,  # EIP-1559 transaction
+        'gasPrice': web3.to_wei('20', 'gwei'),
+        'nonce': web3.eth.get_transaction_count(miner_address),
     })
+    signed_tx = web3.eth.account.sign_transaction(submit_result_tx, private_key=miner_private_key)
+    web3.eth.send_raw_transaction(signed_tx.rawTransaction)
 
-    # Sign the transaction with the miner's private key
-    #signed_tx = web3.eth.account.sign_transaction(submit_result_tx, private_key=miner_private_key)
-
-    # Send the signed transaction
-    #tx_hash = web3.eth.send_raw_transaction(signed_tx.rawTransaction)
-
-    return redirect(url_for('index'))
+    return jsonify({'status': 'Result submitted successfully', 'task_id': task_id})
 
 if __name__ == '__main__':
     app.run(debug=True)
